@@ -1,0 +1,57 @@
+{{- /* Override of hugo-kicad-site's partial: loads a vendored KiCanvas
+       (static/vendor/kicanvas, MIT) instead of kicanvas.org at view time. */ -}}
+<div class="viewer-wrap">
+  {{ partial "fullscreen-btn.html" . }}
+  {{ $files := .Site.Params.kicadFiles }}
+  <kicanvas-embed id="kicanvas-viewer" src="{{ $.Site.BaseURL }}kicad/{{ index $files 0 }}">
+    {{ range $files }}
+    <kicanvas-source src="{{ $.Site.BaseURL }}kicad/{{ . }}"></kicanvas-source>
+    {{ end }}
+  </kicanvas-embed>
+</div>
+<script>
+  var v = document.getElementById('kicanvas-viewer');
+  v.setAttribute('controls', 'full');
+  v.setAttribute('theme', 'kicad');
+  v.setAttribute('controlslist', 'nooverlay');
+
+  // PCB view defaults: zoom to the board outline (KiCanvas always fits the
+  // drawing sheet) and hide the Fab layers (still toggleable in the layers
+  // panel). The load event doesn't bubble out of the shadow DOM, so find the
+  // board viewer element and wait for it.
+  (function () {
+    function find(root, sel) {
+      var hit = root.querySelector(sel);
+      if (hit) return hit;
+      for (var el of root.querySelectorAll('*')) {
+        if (el.shadowRoot && (hit = find(el.shadowRoot, sel))) return hit;
+      }
+      return null;
+    }
+    var HIDDEN_LAYERS = ['F.Fab', 'B.Fab'];
+    function setup(el) {
+      var viewer = el.viewer;
+      if (!viewer) return;
+      HIDDEN_LAYERS.forEach(function (name) {
+        var layer = viewer.layers && viewer.layers.by_name(name);
+        if (layer) layer.visible = false;
+      });
+      if (viewer.zoom_to_board) viewer.zoom_to_board();
+      viewer.draw();
+      var panel = find(v.shadowRoot, 'kc-board-layers-panel');   // keep checkboxes in sync
+      if (panel && panel.update_item_states) panel.update_item_states();
+    }
+    var tries = 0;
+    var poll = setInterval(function () {
+      var bv = v.shadowRoot && find(v.shadowRoot, 'kc-board-viewer');
+      if (bv) {
+        clearInterval(poll);
+        if (bv.loaded) setup(bv);
+        else bv.addEventListener('kicanvas:load', function () { setup(bv); }, { once: true });
+      } else if (++tries > 150) {
+        clearInterval(poll);   // ~15 s: no PCB in this embed
+      }
+    }, 100);
+  })();
+</script>
+<script type="module" src="{{ "vendor/kicanvas/kicanvas.js" | relURL }}"></script>

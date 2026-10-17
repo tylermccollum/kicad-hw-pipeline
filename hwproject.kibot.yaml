@@ -1,0 +1,261 @@
+# Single KiBot config: site outputs, fab/assembly drawings and JLCPCB package.
+# Output names must match the hugo-kicad-site discovery patterns:
+#   *schematic*.pdf, *bom*.html, *ibom*.html, 3D/*.png, *JLCPCB*.zip
+kibot:
+  version: 1
+
+global:
+  kicad_dnp_applies_to_3D: true
+  environment:
+    models_3d: ${KICAD10_3DMODEL_DIR}
+
+import:
+  - file: JLCPCB            # gerbers, drill, BOM, CPL, zip -> JLCPCB/
+
+preflight:
+  # Reports land in Checks/. Preview builds keep going on violations so a WIP
+  # board still gets a site; releases pass `-E CHECKS_DONT_STOP=false` so any
+  # ERC/DRC error fails the build (see release.yml / `make release`).
+  erc: { enabled: true, dir: Checks, dont_stop: @CHECKS_DONT_STOP@ }
+  drc: { enabled: true, dir: Checks, dont_stop: @CHECKS_DONT_STOP@ }
+  set_text_variables:
+    - name: GIT_HASH
+      command: git rev-parse --short HEAD
+    - name: REVISION
+      command: echo ${REVISION:-$(git describe --tags --exact-match 2>/dev/null || echo dev)}
+
+outputs:
+  - name: schematic
+    comment: Schematic PDF
+    type: pdf_sch_print
+    dir: Schematic
+    options: { output: "%f-schematic.pdf" }
+
+  - name: bom
+    comment: Generic BOM (HTML)
+    type: bom
+    dir: BoM
+    options:
+      format: HTML
+      output: "%f-bom.html"
+      columns:
+        - Row
+        - References
+        - Value
+        - Footprint
+        - Quantity Per PCB
+        - field: _field_lcsc_part
+          name: LCSC Part #
+
+  - name: ibom
+    comment: Interactive BOM
+    type: ibom
+    dir: BoM
+    options: { output: "%f-ibom.html" }
+
+  - name: glb
+    comment: Board model for the site's assembly viewer
+    type: export_3d
+    dir: Assembly
+    options: { format: glb, output: "assembly-pcb.glb" }
+
+  # Site renders: KiCad's raytracer (correct package colours / ENIG, ~20 s each).
+  # Views: rotate_* in 10 degree steps; zoom in steps (negative = further away).
+  - name: render_top
+    comment: 3D render, top (site gallery + hero image)
+    type: render_3d
+    dir: 3D
+    options: &site_render
+      output: '%f-3D_1_top.%x'
+      ray_tracing: true
+      rotate_x: 3
+      rotate_z: -2
+      zoom: -12
+      width: 1920
+      height: 1440
+      transparent_background: true
+      auto_crop: true
+
+  - name: render_bottom
+    comment: 3D render, bottom
+    type: render_3d
+    dir: 3D
+    options:
+      <<: *site_render
+      output: '%f-3D_2_bottom.%x'
+      view: bottom
+
+  - name: diff_sch
+    comment: Schematic diff vs previous tag
+    type: diff
+    dir: Diff
+    run_by_default: false
+    options: { old: "KIBOT_TAG-@DIFF_SKIP_TAGS@", old_type: git, cache_dir: /tmp/kibot-diff-cache, add_link_id: true, pcb: false }
+
+  - name: diff_pcb
+    comment: PCB diff vs previous tag
+    type: diff
+    dir: Diff
+    run_by_default: false
+    options: { old: "KIBOT_TAG-@DIFF_SKIP_TAGS@", old_type: git, cache_dir: /tmp/kibot-diff-cache, add_link_id: true }
+
+  # ── Fab & assembly drawings ────────────────────────────────
+  # Tables and note blocks are KiBot `report` outputs from kibot_templates/*.csv
+  # (${VAR} = env, project text variables or board stats). Each is drawn at the
+  # board group `kibot_table_<output name>`. site/scripts/setup_drawing_layers.py
+  # lays those out (and the drawing layers) in the build's throwaway copy.
+  - name: fab_notes
+    comment: Fabrication data table
+    type: report
+    dir: Fabrication/Tables
+    options: { template: kibot_templates/fab_notes.csv, output: '%f-fab_notes.csv' }
+
+  - name: fab_instructions
+    comment: Fabrication notes block
+    type: report
+    dir: Fabrication/Tables
+    options: { template: kibot_templates/fab_instructions.csv, output: '%f-fab_instructions.csv' }
+
+  - name: drill_table
+    comment: Drill table
+    type: excellon
+    dir: Fabrication/Tables
+    options:
+      generate_drill_files: false
+      table: { unify_pth_and_npth: 'yes', group_slots_and_round_holes: true }
+
+  - name: asm_count
+    comment: Component count table
+    type: report
+    dir: Assembly/Tables
+    options: { template: total_components, output: '%f-asm_count.csv' }
+
+  - name: asm_instructions
+    comment: Assembly notes block
+    type: report
+    dir: Assembly/Tables
+    options: { template: kibot_templates/assembly_instructions.csv, output: '%f-asm_instructions.csv' }
+
+  - name: fab_drawing
+    comment: Fabrication drawing
+    type: pcb_print
+    dir: Fabrication
+    options:
+      output: '%f-fabrication.pdf'
+      format: PDF
+      title: Fabrication Drawing
+      scaling: @DRAWING_SCALE@
+      colored_pads: false
+      colored_vias: false
+      realistic_solder_mask: false
+      include_table:
+        outputs:
+          - { name: fab_notes, column_spacing: 2, row_spacing: 2, force_font_width: @TABLE_FONT@ }
+          - &notes_block { name: fab_instructions, column_spacing: 1, row_spacing: 2, force_font_width: @TABLE_FONT@,
+                           border_width: 0, top_rule_width: 0, bottom_rule_width: 0, header_rule_width: 0,
+                           vertical_rule_width: 0, horizontal_rule_width: 0 }
+          - { name: drill_table, column_spacing: 2, row_spacing: 2, force_font_width: @TABLE_FONT@ }
+      pages:
+        - sheet: 'Top (Scale @DRAWING_SCALE_LABEL@)'
+          sheet_reference_color: '#000000'
+          layers:
+            - { layer: Edge.Cuts, color: '#000000' }
+            - { layer: F.Cu, color: '#E6E6E6' }
+            - { layer: F.Mask, color: '#D0D0D0' }
+            - { layer: F.SilkS, color: '#808080' }
+            - { layer: Dimensions, color: '#0050A0' }
+            - { layer: FabNotes, color: '#000000', use_for_center: false }
+        - sheet: 'Bottom, viewed from bottom (Scale @DRAWING_SCALE_LABEL@)'
+          mirror: true
+          sheet_reference_color: '#000000'
+          layers:
+            - { layer: Edge.Cuts, color: '#000000' }
+            - { layer: B.Cu, color: '#E6E6E6' }
+            - { layer: B.Mask, color: '#D0D0D0' }
+            - { layer: B.SilkS, color: '#808080' }
+            - { layer: Dimensions, color: '#0050A0' }
+        - sheet: 'Drill drawing %lp (Scale @DRAWING_SCALE_LABEL@)'
+          sheet_reference_color: '#000000'
+          repeat_for_layer: DrillMap
+          repeat_layers: drill_pairs
+          layers:
+            - { layer: DrillMap, color: '#000000', use_for_center: false }
+            - { layer: Edge.Cuts, color: '#000000' }
+        - sheet: '%ln (Scale @DRAWING_SCALE_LABEL@)'
+          sheet_reference_color: '#000000'
+          repeat_for_layer: F.Cu
+          repeat_layers: copper
+          layers:
+            - { layer: F.Cu, color: '#B05000' }
+            - { layer: Edge.Cuts, color: '#000000' }
+
+  - name: asm_iso
+    comment: 3D view for the assembly drawing cover (KiCad raytracer)
+    type: render_3d
+    dir: Assembly
+    options:
+      output: '%f-iso.%x'
+      ray_tracing: true
+      rotate_x: 3            # 10 degree steps
+      rotate_z: -4
+      zoom: -12
+      width: 2000            # 4:3, matches the kibot_image_asm_iso box
+      height: 1500
+      transparent_background: true
+      auto_crop: false
+
+  - name: assembly_drawing
+    comment: Assembly drawing
+    type: pcb_print
+    dir: Assembly
+    options:
+      output: '%f-assembly.pdf'
+      format: PDF
+      title: Assembly Drawing
+      scaling: @DRAWING_SCALE@
+      colored_pads: false
+      colored_vias: false
+      realistic_solder_mask: false
+      include_table:
+        outputs:
+          - { name: asm_count, column_spacing: 2, row_spacing: 2, force_font_width: @TABLE_FONT@ }
+          - { <<: *notes_block, name: asm_instructions, force_font_width: 2.0 }   # cover page prints 1:1
+      pages:
+        - sheet: 'Isometric view'
+          sheet_reference_color: '#000000'
+          # 1:1 and uncentered: KiBot pastes kibot_image_* at raw sheet coordinates.
+          scaling: 1.0
+          layers:
+            - { layer: AsmCover, color: '#000000', use_for_center: false }
+        - sheet: 'Top assembly (Scale @DRAWING_SCALE_LABEL@)'
+          sheet_reference_color: '#000000'
+          layers:
+            - { layer: Edge.Cuts, color: '#000000' }
+            - { layer: F.Cu, color: '#F0F0F0' }
+            - { layer: F.SilkS, color: '#C8C8C8', plot_footprint_values: false }
+            - { layer: F.Fab, color: '#000000', plot_footprint_values: false }
+            - { layer: AsmNotes, color: '#000000', use_for_center: false }
+        - sheet: 'Bottom assembly, viewed from bottom (Scale @DRAWING_SCALE_LABEL@)'
+          mirror: true
+          sheet_reference_color: '#000000'
+          layers:
+            - { layer: Edge.Cuts, color: '#000000' }
+            - { layer: B.Cu, color: '#F0F0F0' }
+            - { layer: B.SilkS, color: '#C8C8C8', plot_footprint_values: false }
+            - { layer: B.Fab, color: '#000000', plot_footprint_values: false }
+
+...
+# KIBOT_TAG-n skips n tags walking back from HEAD. On a tagged commit HEAD's own
+# tag is the first hit, so tag builds pass `-E DIFF_SKIP_TAGS=1` to diff
+# against the previous release instead of themselves.
+definitions:
+  DIFF_SKIP_TAGS: 0
+  CHECKS_DONT_STOP: true
+  # Fab/assembly drawing scale. `auto`: every build picks the largest standard
+  # scale that fits the board on its sheet (the values below are just
+  # defaults). `fixed`: DRAWING_SCALE is used as set; `make -C site pin-layout`
+  # fixes it for hand-adjusted placeholders.
+  DRAWING_SCALE_MODE: auto
+  DRAWING_SCALE: 2
+  DRAWING_SCALE_LABEL: '2:1'
+  TABLE_FONT: 1

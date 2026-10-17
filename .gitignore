@@ -1,0 +1,23 @@
+*-backups/
+*.lck
+*.bak
+*.log
+
+
+# KiBot / site pipeline outputs (see site/Makefile)
+generated/
+build/
+site/public/
+site/resources/
+site/static/3D/
+site/static/Assembly/
+site/static/BoM/
+site/static/Checks/
+site/static/Diff/
+site/static/Fabrication/
+site/static/JLCPCB/
+site/static/Schematic/
+site/static/kicad/
+site/static/assembly/
+site/config_override.yaml
+site/.hugo_build.lock

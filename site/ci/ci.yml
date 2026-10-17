@@ -1,0 +1,130 @@
+name: Hardware CI
+# Installed to .github/workflows/ci.yml by `make -C site init` (KiCad project
+# templates do not copy hidden directories like .github/).
+
+# Runs the same `make` targets as a local build (site/Makefile), so CI and
+# local outputs match.
+#   pull_request      -> build the `latest` site, upload as artifact (no deploy)
+#   push to main      -> build + deploy /latest/
+#   push tag v*       -> strict release build, GitHub Release with packages,
+#                        deploy /<tag>/
+#   workflow_dispatch -> rebuild latest, or backfill an existing tag
+# Deploys stay off until the repo variable PAGES_DEPLOY is "true"
+# (Settings -> Secrets and variables -> Actions -> Variables).
+on:
+  pull_request:
+    paths: ["*.kicad_*", "*.kibot.yaml", "*.kicad_sym", "kibot_templates/**", "site/**", ".github/workflows/ci.yml"]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v1.0.0. Leave blank for latest."
+        default: ""
+      strict:
+        description: "Fail on ERC/DRC errors (tag builds)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    env:
+      BASE_PATH: /${{ github.event.repository.name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # tags + history for git describe and diffs
+
+      - name: Determine version
+        id: ver
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then v="$INPUT_TAG"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then v="$GITHUB_REF_NAME"
+          else v=latest; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build/cache_3d
+            build/hugo_cache
+          key: kibot-hugo-${{ hashFiles('site/go.sum') }}
+          restore-keys: kibot-hugo-
+
+      - name: Build latest site
+        if: steps.ver.outputs.version == 'latest'
+        run: make -C site kibot build
+
+      - name: Build release (fails on ERC/DRC errors when strict)
+        if: steps.ver.outputs.version != 'latest'
+        env:
+          STRICT: ${{ (github.event_name != 'workflow_dispatch' || inputs.strict) && '1' || '0' }}
+        run: make -C site release TAG=${{ steps.ver.outputs.version }}
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: site-${{ steps.ver.outputs.version }}
+          path: build/www/${{ steps.ver.outputs.version }}
+
+      - uses: actions/upload-artifact@v5
+        if: steps.ver.outputs.version != 'latest'
+        with:
+          name: release-${{ steps.ver.outputs.version }}
+          path: build/releases/${{ steps.ver.outputs.version }}
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: release-${{ needs.build.outputs.version }}
+          path: release
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*
+
+  deploy:
+    needs: build
+    if: vars.PAGES_DEPLOY == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: site-${{ needs.build.outputs.version }}
+          path: new-site
+
+      # Start from what's already published so other versions are kept, swap in
+      # this version, and regenerate versions.json for the version picker.
+      - name: Assemble gh-pages tree
+        run: |
+          mkdir -p www
+          if git fetch --depth=1 origin gh-pages; then
+            git archive FETCH_HEAD | tar -x -C www
+          fi
+          rm -rf "www/$VERSION"
+          mv new-site "www/$VERSION"
+          site/scripts/versions.sh www
+
+      - uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: www

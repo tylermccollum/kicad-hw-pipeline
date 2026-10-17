@@ -1,0 +1,6 @@
+{{- /* Links to the ERC/DRC reports discovered by the build (params.checks). */ -}}
+{{- with site.Params.checks -}}
+<p>Design checks:
+{{- range $i, $c := . }}{{ if $i }} ·{{ end }} <a href="{{ $c.path | relURL }}">{{ $c.name }}</a>{{ end }}
+</p>
+{{- end -}}

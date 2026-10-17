@@ -1,0 +1,55 @@
+# baseURL and the empty lists below are overridden per build by
+# config_override.yaml (written by site/scripts/prepare.sh, locally and in CI).
+baseURL: /latest/
+languageCode: en-us
+title: "__PROJECT_TITLE__"
+
+module:
+  imports:
+    - path: github.com/laenzlinger/hugo-kicad-site
+
+params:
+  projectName: "__PROJECT_TITLE__"
+  description: "KiCad hardware project"
+  repoURL: "__REPO_URL__"
+  license: ""
+  version: "main"
+  renders: []
+  downloads: []
+  kicadFiles: []
+  navbar:
+    displayTitle: true
+    displayLogo: false
+    width: wide
+  page:
+    width: wide
+  theme:
+    default: system
+    displayToggle: false
+  footer:
+    displayCopyright: false
+    displayPoweredBy: false
+
+menu:
+  main:
+    - name: Release
+      pageRef: /release/
+      weight: 15
+    - name: Board
+      pageRef: /board/
+      weight: 20
+    - name: GitHub
+      url: __REPO_URL__
+      params:
+        icon: github
+      weight: 100
+    - name: Theme Toggle
+      weight: 110
+      params:
+        type: theme-toggle
+
+# _index.md uses raw HTML for the hero render.
+markup:
+  goldmark:
+    renderer:
+      unsafe: true

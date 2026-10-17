@@ -1,0 +1,12 @@
+Fabrication data,Value
+Revision,${REVISION} (${GIT_HASH})
+Copper layers,${layers}
+Board size,${bb_w_mm} x ${bb_h_mm} mm
+Finished thickness,${thickness_mm} mm
+Material,${pcb_material}
+Surface finish,${pcb_finish}
+Solder mask,${solder_mask_color}
+Silkscreen,${silk_screen_color}
+Min track width,${track_d_mm} mm
+Min drill (finished),${drill_real_min_mm} mm
+Vias,${vias_count}

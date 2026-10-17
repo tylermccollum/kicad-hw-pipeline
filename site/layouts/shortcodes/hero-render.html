@@ -1,0 +1,4 @@
+{{- /* First 3D render discovered by the build (params.renders), for the overview page. */ -}}
+{{- with index (site.Params.renders | default slice) 0 -}}
+<img src="{{ printf "3D/%s" . | relURL }}" alt="{{ site.Params.projectName }} 3D render">
+{{- end -}}
