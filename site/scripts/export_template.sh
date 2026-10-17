@@ -18,15 +18,17 @@ KIBOT_IMAGE=${KIBOT_IMAGE:-ghcr.io/inti-cmnb/kicad10_auto_full@sha256:7b720dc99b
 pros=("$REPO"/*.kicad_pro)
 PROJECT=${PROJECT:-$(basename "${pros[0]}" .kicad_pro)}
 
-# Re-export in place, keeping DEST/.git so the template can be its own repo.
-# Refuse to clear a non-empty folder that isn't a previous export.
-if [ -d "$DEST" ] && [ -n "$(ls -A "$DEST")" ] && [ ! -f "$DEST/meta/info.html" ]; then
-  echo "ERROR: $DEST exists and isn't a previous template export; refusing to overwrite" >&2
+# Build in a staging folder; DEST is only replaced once everything succeeded.
+# DEST/.git is kept, so the template can be its own repository. Refuse to
+# clear a non-empty folder that isn't a previous export.
+FINAL=$DEST
+if [ -d "$FINAL" ] && [ -n "$(ls -A "$FINAL")" ] \
+   && [ ! -f "$FINAL/$BASE.kicad_pro" ] && [ ! -f "$FINAL/meta/info.html" ]; then
+  echo "ERROR: $FINAL exists and isn't a previous template export; refusing to overwrite" >&2
   exit 1
 fi
-mkdir -p "$DEST"
-DEST=$(cd "$DEST" && pwd)
-find "$DEST" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+DEST=$(mktemp -d "${TMPDIR:-/tmp}/hw-pipeline-export.XXXXXX")
+trap 'rm -rf "$DEST"' EXIT
 mkdir -p "$DEST/meta" "$DEST/site/content"
 
 # ── Tooling, copied as-is ─────────────────────────────────────────────────────
@@ -98,6 +100,27 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$DEST:/w" -w /w "$KIBOT_
 rm -f "$DEST/.mkblank.py" "$DEST/$BASE.kicad_prl"
 # B-size sheet (PAGE_INFO isn't usable from Python): fits the 2:1 drawing layout.
 sed -i 's/(paper "A4")/(paper "B")/' "$DEST/$BASE.kicad_pcb"
+# Deterministic UUIDs, so re-exporting an unchanged template gives identical
+# files (keeps the template repo's history clean).
+python3 - "$DEST/$BASE.kicad_pcb" "$DEST/$BASE.kicad_sch" <<'PY'
+import re, sys, uuid
+for path in sys.argv[1:]:
+    text, n = open(path).read(), iter(range(10**6))
+    name = path.rsplit("/", 1)[-1]
+    # KiCad saves footprints in (random) UUID order: sort them by reference.
+    fps = re.findall(r'\n\t\(footprint .*?\n\t\)', text, re.S)
+    if fps:
+        first = text.index(fps[0])
+        rest = text[first:]
+        for fp in fps:
+            rest = rest.replace(fp, "", 1)
+        ref = lambda fp: re.search(r'\(property "Reference" "([^"]*)"', fp).group(1)
+        text = text[:first] + "".join(sorted(fps, key=ref)) + rest
+    def stable(m):
+        return '(uuid "%s")' % uuid.uuid5(uuid.NAMESPACE_URL, "hw-pipeline/%s/%d" % (name, next(n)))
+    text = re.sub(r'\(uuid "[0-9a-f-]+"\)', stable, text)
+    open(path, "w").write(text)
+PY
 [ -f "$DEST/$BASE.kicad_pcb" ] && [ -f "$DEST/$BASE.kicad_pro" ] || { echo "ERROR: blank project not created" >&2; exit 1; }
 
 # ── Docs: KiCad's template chooser page and the new project's README ─────────
@@ -247,5 +270,9 @@ a strict release, attach the packages to a GitHub Release and publish
 branch `gh-pages`, then add the Actions variable `PAGES_DEPLOY` = `true`.
 EOF
 
-echo "Template written to $DEST"
-find "$DEST" -maxdepth 2 -not -path '*/static/*' | sort | sed "s|$DEST|.|"
+mkdir -p "$FINAL"
+FINAL=$(cd "$FINAL" && pwd)
+find "$FINAL" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+cp -a "$DEST/." "$FINAL/"
+echo "Template written to $FINAL"
+find "$FINAL" -maxdepth 2 -not -path '*/static/*' -not -path '*/.git/*' -not -name .git | sort | sed "s|$FINAL|.|"
