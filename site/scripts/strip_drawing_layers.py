@@ -1,6 +1,6 @@
 """Copy a .kicad_pcb without the fab/assembly drawing annotations.
 
-    python3 strip_drawing_layers.py <in.kicad_pcb> <out.kicad_pcb>
+    python3 strip_drawing_layers.py <in.kicad_pcb> <out.kicad_pcb>   (or import strip())
 
 Used for the KiCanvas viewer copy only: drops every top-level item on the
 drawing layers created by setup_drawing_layers.py (matched by layer name, so
@@ -33,30 +33,36 @@ def top_level_items(text):
         i += 1
 
 
-src, dst = sys.argv[1], sys.argv[2]
-text = open(src, encoding="utf-8").read()
+def strip(src, dst):
+    """Write `src` to `dst` without drawing-layer items; return how many were dropped."""
+    text = open(src, encoding="utf-8", newline="").read()
 
-# Canonical layer ids (e.g. "User.2") whose user name is a drawing layer.
-canon = {m.group(1) for m in re.finditer(r'\(\d+ "([^"]+)" user "([^"]+)"\)', text)
-         if m.group(2) in DRAWING_LAYERS}
-layer_re = re.compile(r'\(layer "(%s)"' % "|".join(map(re.escape, canon))) if canon else None
+    # Canonical layer ids (e.g. "User.2") whose user name is a drawing layer.
+    canon = {m.group(1) for m in re.finditer(r'\(\d+ "([^"]+)" user "([^"]+)"\)', text)
+             if m.group(2) in DRAWING_LAYERS}
+    layer_re = re.compile(r'\(layer "(%s)"' % "|".join(map(re.escape, canon))) if canon else None
 
-out, last, dropped = [], 0, 0
-for s, e in top_level_items(text):
-    item = text[s:e]
-    head = item[1:item.find(" ", 1) if " " in item[:40] else 40].strip()
-    drop = (head == "group" and re.match(r'\(group "kibot_(table|image)_', item)) or \
-           (layer_re and head != "footprint" and layer_re.search(item))
-    if drop:
-        # also eat the indentation/newline that preceded the item
-        ws = s
-        while ws > last and text[ws - 1] in " \t":
-            ws -= 1
-        if ws > last and text[ws - 1] == "\n":
-            ws -= 1
-        out.append(text[last:ws])
-        last = e
-        dropped += 1
-out.append(text[last:])
-open(dst, "w", encoding="utf-8").write("".join(out))
-print(f"{dst}: dropped {dropped} drawing items")
+    out, last, dropped = [], 0, 0
+    for s, e in top_level_items(text):
+        item = text[s:e]
+        head = item[1:item.find(" ", 1) if " " in item[:40] else 40].strip()
+        drop = (head == "group" and re.match(r'\(group "kibot_(table|image)_', item)) or \
+               (layer_re and head != "footprint" and layer_re.search(item))
+        if drop:
+            # also eat the indentation/newline that preceded the item
+            ws = s
+            while ws > last and text[ws - 1] in " \t\r":
+                ws -= 1
+            if ws > last and text[ws - 1] == "\n":
+                ws -= 1
+            out.append(text[last:ws])
+            last = e
+            dropped += 1
+    out.append(text[last:])
+    open(dst, "w", encoding="utf-8", newline="").write("".join(out))
+    return dropped
+
+
+if __name__ == "__main__":
+    n = strip(sys.argv[1], sys.argv[2])
+    print(f"{sys.argv[2]}: dropped {n} drawing items")

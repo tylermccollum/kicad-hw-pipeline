@@ -3,19 +3,19 @@
     python3 setup_drawing_layers.py <board.kicad_pcb> <project.kibot.yaml> [MODE]
 
 MODE
-  (none)         Build mode. kibot.sh runs this on its throwaway copy of the
+  (none)         Build mode. `hw kibot` runs this on its throwaway copy of the
                  project before every KiBot run; your real files are never
                  touched. Adds the drawing layers, picks the scale, writes the
                  scale values into the (throwaway) KiBot config, and adds any
                  missing placeholders and outline dimensions.
   --layers-only  Just add/name the drawing layers (DrillMap, FabNotes,
-                 Dimensions, AsmNotes, AsmCover). `make -C site init`.
+                 Dimensions, AsmNotes, AsmCover). `hw init`.
   --pin          Write the current automatic layout into the real board so it
                  can be adjusted in the PCB editor, and fix the scale
-                 (DRAWING_SCALE_MODE: fixed). `make -C site pin-layout`.
+                 (DRAWING_SCALE_MODE: fixed). `hw pin-layout`.
   --unpin        Remove the placeholders, cover caption and generated outline
                  dimensions from the real board and return to automatic
-                 scaling. `make -C site unpin-layout`.
+                 scaling. `hw unpin-layout`.
 
 Placeholders are board groups named kibot_table_<output> / kibot_image_<output>;
 KiBot draws each table or image at its group. Any group already on the board
@@ -169,7 +169,7 @@ if (get_def("DRAWING_SCALE_MODE") or "auto") == "auto":
               "use a larger sheet (Page Settings)")
     if pinned and mode == "build":
         print("NOTE: the board has pinned placeholders but DRAWING_SCALE_MODE is auto; "
-              "they were placed for a fixed scale (make -C site unpin-layout to go fully automatic)")
+              "they were placed for a fixed scale (`hw unpin-layout` to go fully automatic)")
 else:
     scale = float(get_def("DRAWING_SCALE") or 2)
 label = f"{scale:g}:1" if scale >= 1 else f"1:{1 / scale:g}"

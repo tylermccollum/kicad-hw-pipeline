@@ -1,0 +1,6 @@
+# Normalise line endings so scripts and templates work on every OS.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.glb binary
+*.zip binary

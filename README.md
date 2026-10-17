@@ -1,4 +1,4 @@
-<!-- hw-pipeline template README: `make -C site init` replaces this file with
+<!-- hw-pipeline template README: `hw init` replaces this file with
      site/README.project.md in projects created from the template. -->
 # KiCad hardware pipeline template
 
@@ -15,8 +15,18 @@ documentation pipeline:
 - **CI**: pull requests build the site, `main` publishes it, `v*` tags make a
   strict release (ERC/DRC must pass) with packages attached.
 
-Everything runs in Docker. The host needs `docker`, `git`, `make`, `rsync`,
-`jq`, `zip` and `python3`, and a Linux-like shell (see *Platforms* below).
+## Requirements
+
+Works the same on **Windows, macOS and Linux**. You need:
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Linux:
+  Docker Engine), running. KiCad, KiBot and Hugo all run in containers.
+- [git](https://git-scm.com/downloads)
+- [Python 3.8+](https://www.python.org/downloads/) (Windows: tick "Add
+  python.exe to PATH" in the installer, or use the `py` launcher it installs)
+
+No WSL, make, bash or other Unix tools are needed. On Apple Silicon Macs the
+KiCad container runs under x86-64 emulation, so builds are slower.
 
 ## Install
 
@@ -25,9 +35,9 @@ Clone this repository into KiCad's user template folder (KiCad skips the
 
 | OS | KiCad 10 user template folder |
 |---|---|
-| Linux | `~/.local/share/kicad/10.0/template/` |
-| macOS | `~/Documents/KiCad/10.0/template/` |
 | Windows | `%USERPROFILE%\Documents\KiCad\10.0\template\` |
+| macOS | `~/Documents/KiCad/10.0/template/` |
+| Linux | `~/.local/share/kicad/10.0/template/` |
 
 (KiCad → Preferences → Configure Paths → `KICAD_USER_TEMPLATE_DIR` shows the
 exact location.)
@@ -37,11 +47,12 @@ exact location.)
 1. In KiCad: **File → New Project from Template → User Templates →
    Hardware pipeline**, choose a folder and name. Every file named
    `hwproject.*` is renamed to your project name.
-2. **Close the project in KiCad**, then in the new project folder:
+2. **Close the project in KiCad**, then open a terminal in the new project
+   folder and run:
 
-   ```sh
-   TITLE="My Board" make -C site init
-   ```
+   | Windows (cmd or PowerShell) | macOS / Linux |
+   |---|---|
+   | `hw init --title "My Board"` | `./hw init --title "My Board"` |
 
    This initialises git (if needed), installs `.github/workflows/ci.yml`
    (KiCad templates can't carry hidden folders, so its source lives in
@@ -50,30 +61,23 @@ exact location.)
    (DrillMap, FabNotes, Dimensions, AsmNotes, AsmCover) for your own
    annotations, and replaces this README with a project README.
 3. Replace the placeholder 50 x 50 mm outline and mounting holes with your
-   design, then build:
+   design, then build and preview:
 
-   ```sh
-   make -C site kibot build host     # http://127.0.0.1:8000/
    ```
+   hw kibot build host        (./hw on macOS/Linux)   ->  http://127.0.0.1:8000/
+   ```
+
+If `hw` isn't found, run the tool directly: `python site/hw.py ...`
+(`py site\hw.py ...` on Windows, `python3 site/hw.py ...` on macOS/Linux).
 
 ## Using the pipeline
 
-See `README.md` in the created project (from `site/README.project.md`).
-
-## Platforms
-
-- **Linux**: native.
-- **Windows**: use WSL2 with Docker Desktop's WSL integration, and keep the
-  project inside the WSL filesystem (KiCad for Windows can open it via
-  `\\wsl$\...`). Native PowerShell/cmd is not supported.
-- **macOS**: needs GNU tools from Homebrew
-  (`brew install bash coreutils gnu-sed findutils rsync make`) with their
-  `gnubin` directories first in `PATH`. On Apple Silicon the KiCad container
-  runs under x86-64 emulation, which is slower.
+See `README.md` in the created project (from `site/README.project.md`), or
+`hw help`.
 
 ## Maintaining this template
 
 This template is exported from a working project with
-`make -C site export-template DEST=<this folder>`; the export keeps `.git`
-and replaces everything else, so make changes in the source project and
-re-export, then commit here.
+`hw export-template --dest <this folder>`; the export keeps `.git` and
+replaces everything else, so make changes in the source project, re-export,
+then commit here.

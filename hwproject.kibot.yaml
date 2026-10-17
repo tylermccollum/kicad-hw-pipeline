@@ -253,7 +253,7 @@ definitions:
   CHECKS_DONT_STOP: true
   # Fab/assembly drawing scale. `auto`: every build picks the largest standard
   # scale that fits the board on its sheet (the values below are just
-  # defaults). `fixed`: DRAWING_SCALE is used as set; `make -C site pin-layout`
+  # defaults). `fixed`: DRAWING_SCALE is used as set; `hw pin-layout`
   # fixes it for hand-adjusted placeholders.
   DRAWING_SCALE_MODE: auto
   DRAWING_SCALE: 2

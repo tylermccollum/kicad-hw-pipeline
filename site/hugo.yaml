@@ -1,5 +1,5 @@
 # baseURL and the empty lists below are overridden per build by
-# config_override.yaml (written by site/scripts/prepare.sh, locally and in CI).
+# config_override.yaml (written by `hw build`/`hw release`, locally and in CI).
 baseURL: /latest/
 languageCode: en-us
 title: "__PROJECT_TITLE__"

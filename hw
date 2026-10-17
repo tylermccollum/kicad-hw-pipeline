@@ -1,0 +1,3 @@
+#!/bin/sh
+# hw: project tooling (Linux/macOS). See `./hw help`. Windows: hw.cmd
+exec python3 "$(dirname "$0")/site/hw.py" "$@"

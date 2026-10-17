@@ -1,8 +1,8 @@
 name: Hardware CI
-# Installed to .github/workflows/ci.yml by `make -C site init` (KiCad project
+# Installed to .github/workflows/ci.yml by `hw init` (KiCad project
 # templates do not copy hidden directories like .github/).
 
-# Runs the same `make` targets as a local build (site/Makefile), so CI and
+# Runs the same `hw` commands as a local build (site/hw.py), so CI and
 # local outputs match.
 #   pull_request      -> build the `latest` site, upload as artifact (no deploy)
 #   push to main      -> build + deploy /latest/
@@ -62,13 +62,13 @@ jobs:
 
       - name: Build latest site
         if: steps.ver.outputs.version == 'latest'
-        run: make -C site kibot build
+        run: python3 site/hw.py kibot build
 
       - name: Build release (fails on ERC/DRC errors when strict)
         if: steps.ver.outputs.version != 'latest'
         env:
           STRICT: ${{ (github.event_name != 'workflow_dispatch' || inputs.strict) && '1' || '0' }}
-        run: make -C site release TAG=${{ steps.ver.outputs.version }}
+        run: python3 site/hw.py release --tag ${{ steps.ver.outputs.version }}
 
       - uses: actions/upload-artifact@v5
         with:
@@ -122,7 +122,7 @@ jobs:
           fi
           rm -rf "www/$VERSION"
           mv new-site "www/$VERSION"
-          site/scripts/versions.sh www
+          python3 site/hw.py versions --www www
 
       - uses: JamesIves/github-pages-deploy-action@v4
         with:
