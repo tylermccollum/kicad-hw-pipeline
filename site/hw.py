@@ -363,8 +363,13 @@ def serve(base_path, host_addr):
 def host(host_addr, port):
     WWW.mkdir(parents=True, exist_ok=True)
     handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(WWW))
+    try:
+        httpd = http.server.ThreadingHTTPServer((host_addr, port), handler)
+    except OSError as e:
+        raise HwError(f"can't serve on {host_addr}:{port} ({e.strerror}); is another `hw host` "
+                      f"already running? Stop it, or use --port <n>")
     log(f"Serving {WWW} at http://{host_addr}:{port}/  (Ctrl-C to stop)")
-    with http.server.ThreadingHTTPServer((host_addr, port), handler) as httpd:
+    with httpd:
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
