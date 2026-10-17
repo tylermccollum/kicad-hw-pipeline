@@ -1,7 +1,7 @@
 ---
 title: Release
 type: release
-weight: 15
+weight: 50
 ---
 
 Fabrication and assembly packages target JLCPCB (gerbers, drill, BOM and

@@ -1,0 +1,44 @@
+{{- /* Override of hugo-kicad-site's partial: interactive 3D viewer for the
+       assembly models (GLB), using the vendored Online3DViewer
+       (static/vendor/o3dv, MIT) instead of a CDN. Click to load. */ -}}
+{{ $models := .Site.Params.assemblyModels }}
+{{ $assemblyDir := default "assembly" .Site.Params.assemblyDir }}
+{{ with $models }}
+{{ range $i, $m := . }}
+{{ $thumb := $m.file | replaceRE `\.(step|glb|3mf)$` ".png" }}
+<div class="viewer-wrap">
+  {{ partial "fullscreen-btn.html" $ }}
+  <div class="viewer-placeholder" data-viewer-id="viewer-{{ $i }}"
+       data-model="{{ $.Site.BaseURL }}{{ $assemblyDir }}/{{ $m.file }}">
+    <img src="{{ $.Site.BaseURL }}{{ $assemblyDir }}/{{ $thumb }}" alt="{{ $m.name }}" onerror="this.style.display='none'">
+    <button class="viewer-load-btn">&#9654;&#xFE0E; Load 3D Model</button>
+  </div>
+  <div id="viewer-{{ $i }}" class="online_3d_viewer" style="display:none;"></div>
+</div>
+{{ end }}
+<script src="{{ "vendor/o3dv/o3dv.min.js" | relURL }}"></script>
+<script>
+  document.querySelectorAll('.viewer-placeholder').forEach(function(ph) {
+    ph.querySelector('.viewer-load-btn').addEventListener('click', function() {
+      var el = document.getElementById(ph.dataset.viewerId);
+      el.style.display = 'block';
+      ph.style.display = 'none';
+      var isDark = document.documentElement.dataset.theme === 'dark' ||
+        document.documentElement.classList.contains('dark');
+      var bg = isDark ? new OV.RGBAColor(30, 30, 30, 255) : new OV.RGBAColor(255, 255, 255, 255);
+      var base = '{{ $.Site.BaseURL }}assets/envmaps/';
+      var env = new OV.EnvironmentSettings(
+        [base+'posx.jpg', base+'negx.jpg', base+'posy.jpg', base+'negy.jpg', base+'posz.jpg', base+'negz.jpg'],
+        false);
+      OV.Init3DViewerFromUrlList(el, [ph.dataset.model], {
+        backgroundColor: bg,
+        defaultColor: new OV.RGBColor(210, 210, 210),
+        edgeSettings: new OV.EdgeSettings(false, new OV.RGBColor(0, 0, 0), 1),
+        environmentSettings: env
+      });
+    });
+  });
+</script>
+{{ else }}
+<p>No 3D model available for this version.</p>
+{{ end }}

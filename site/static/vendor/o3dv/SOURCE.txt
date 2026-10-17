@@ -1,0 +1,3 @@
+Online3DViewer 0.18.0 from https://cdn.jsdelivr.net/npm/online-3d-viewer@0.18.0/build/engine/o3dv.min.js
+sha256 3b3bf3ad87a6bb697c001db40c0640674849b20e27c7e58abf29a64691c00b08
+Refresh with: hw vendor

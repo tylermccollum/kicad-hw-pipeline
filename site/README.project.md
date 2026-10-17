@@ -34,9 +34,16 @@ hw help                           all commands
   again, or `hw unpin-layout` to remove them all.
 - `site/` is a Hugo site using the
   [hugo-kicad-site](https://github.com/laenzlinger/hugo-kicad-site) theme
-  (GPL-3.0) by laenzlinger, with a vendored
-  [KiCanvas](https://kicanvas.org) viewer (MIT; `hw vendor-kicanvas` to
-  refresh). Edit the pages in `site/content/`.
+  (GPL-3.0) by laenzlinger. Tabs: **Design** (`site/content/design/`, your
+  written docs; Mermaid code blocks render as diagrams), **Board**
+  (interactive 3D model, KiCanvas schematic/PCB viewer, renders),
+  **Drawings** (fab/assembly drawings and schematic PDFs), **BOM** (iBOM,
+  sourcing table with LCSC links from the `LCSC Part #` field, plus
+  `Manufacturer`/`MPN` if you add those fields; BOM/CPL files),
+  **Software** (placeholder for firmware/tooling docs in a monorepo,
+  `site/content/software/`) and **Release**. Pages are Markdown in `site/content/`; rearrange them freely.
+- The browser libraries (KiCanvas, Online3DViewer, Mermaid; all MIT) are
+  vendored, so the site makes no CDN requests; `hw vendor` refreshes them.
 
 ### Publishing (GitHub Pages)
 

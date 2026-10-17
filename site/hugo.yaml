@@ -15,6 +15,10 @@ params:
   license: ""
   version: "main"
   renders: []
+  # Mermaid diagrams (```mermaid blocks) from the vendored copy in assets/js,
+  # so neither builds nor visitors fetch it from a CDN.
+  mermaid:
+    js: js/mermaid.min.js
   downloads: []
   kicadFiles: []
   navbar:
@@ -32,12 +36,24 @@ params:
 
 menu:
   main:
-    - name: Release
-      pageRef: /release/
-      weight: 15
+    - name: Design
+      pageRef: /design/
+      weight: 10
     - name: Board
       pageRef: /board/
       weight: 20
+    - name: Drawings
+      pageRef: /drawings/
+      weight: 30
+    - name: BOM
+      pageRef: /bill-of-materials/
+      weight: 40
+    - name: Software
+      pageRef: /software/
+      weight: 45
+    - name: Release
+      pageRef: /release/
+      weight: 50
     - name: GitHub
       url: __REPO_URL__
       params:
@@ -48,7 +64,7 @@ menu:
       params:
         type: theme-toggle
 
-# _index.md uses raw HTML for the hero render.
+# Pages use raw HTML (hero render) and shortcodes.
 markup:
   goldmark:
     renderer:

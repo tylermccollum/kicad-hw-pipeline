@@ -10,8 +10,10 @@ documentation pipeline:
   package (gerbers, drill, BOM, CPL).
 - **Fabrication and assembly drawings** (PDF) with templated notes and data
   tables, laid out and scaled automatically for the board and sheet size.
-- **A versioned documentation site** (Hugo) with an embedded schematic/PCB
-  viewer, hosted locally or on GitHub Pages.
+- **A versioned documentation site** (Hugo), hosted locally or on GitHub
+  Pages, with Design (written docs and diagrams), Board (interactive 3D
+  model and schematic/PCB viewer), Drawings, BOM (iBOM and sourcing),
+  Software (firmware/tooling docs placeholder) and Release tabs.
 - **CI**: pull requests build the site, `main` publishes it, `v*` tags make a
   strict release (ERC/DRC must pass) with packages attached.
 

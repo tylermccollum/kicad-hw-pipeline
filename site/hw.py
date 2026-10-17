@@ -15,7 +15,7 @@ Commands run in the order given, e.g. `hw kibot build host`.
   release          --tag vX.Y.Z: strict ERC/DRC, packages in build/releases/, versioned site
   pin-layout       copy the drawing layout into the board to adjust by hand (KiCad closed)
   unpin-layout     remove pinned drawing placeholders; back to automatic layout
-  vendor-kicanvas  refresh the vendored KiCanvas viewer from kicanvas.org
+  vendor           refresh the vendored viewers (KiCanvas, Online3DViewer, Mermaid)
   export-template  write this tooling as a KiCad project template (--dest)
   clean            remove local build state (keeps build/releases)
   versions         regenerate versions.json/index.html in a site folder (--www)
@@ -307,7 +307,27 @@ def prepare(gen, src, tag, base_url):
     if glb.exists():
         (static / "assembly").mkdir(exist_ok=True)
         shutil.copy2(glb, static / "assembly")
+        if renders:   # preview image shown until the 3D model is loaded
+            shutil.copy2(gen / "3D" / renders[0], static / "assembly" / "assembly-pcb.png")
         assembly = [{"name": "pcb", "file": glb.name}]
+
+    def found(spec):
+        out = []
+        for name, pattern, exclude in spec:
+            hit = first(files, pattern, exclude)
+            if hit:
+                out.append({"name": name, "path": rel(hit)})
+        return out
+    # Drawings and BOM files are shown for every build (downloads: releases only)
+    drawings = found([("Fabrication drawing", "*-fabrication.pdf", None),
+                      ("Assembly drawing", "*-assembly.pdf", None),
+                      ("Schematic", "*schematic*.pdf", None)])
+    bom_files = found([("Interactive BOM (HTML)", "*ibom*.html", None),
+                       ("BOM (HTML)", "*-bom.html", "*ibom*"),
+                       ("BOM (CSV)", "BoM/*-bom.csv", None),
+                       ("JLCPCB BOM (CSV)", "*_bom_jlc.csv", None),
+                       ("JLCPCB pick and place (CSV)", "*_cpl_jlc.csv", None)])
+    bom_csv = first(files, "BoM/*-bom.csv")
 
     j = partial(json.dumps, ensure_ascii=False)   # JSON is valid YAML flow syntax
     lines = [f"baseURL: {j(base_url)}", "params:",
@@ -320,6 +340,10 @@ def prepare(gen, src, tag, base_url):
         lines.append(f"  bom: {j(rel(bom))}")
     if assembly:
         lines.append(f"  assemblyModels: {j(assembly)}")
+    lines.append(f"  drawings: {j(drawings)}")
+    lines.append(f"  bomFiles: {j(bom_files)}")
+    if bom_csv:
+        lines.append(f"  bomCsv: {j(rel(bom_csv))}")
     (SITE / "config_override.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
     log(f"Wrote {SITE / 'config_override.yaml'}")
 
@@ -472,16 +496,28 @@ def has_remote():
     return "origin" in git("remote", check=False).split()
 
 
-def vendor_kicanvas():
-    dst = SITE / "static" / "vendor" / "kicanvas" / "kicanvas.js"
-    with urllib.request.urlopen("https://kicanvas.org/kicanvas/kicanvas.js") as r:
-        data = r.read()
-    dst.write_bytes(data)
+VENDORED = [
+    # (url, destination relative to site/, label). KiCanvas has no versioned builds.
+    ("https://kicanvas.org/kicanvas/kicanvas.js", "static/vendor/kicanvas/kicanvas.js", "KiCanvas"),
+    ("https://cdn.jsdelivr.net/npm/online-3d-viewer@0.18.0/build/engine/o3dv.min.js",
+     "static/vendor/o3dv/o3dv.min.js", "Online3DViewer 0.18.0"),
+    ("https://cdn.jsdelivr.net/npm/mermaid@12.2.0/dist/mermaid.min.js", "assets/js/mermaid.min.js", "Mermaid 12.2.0"),
+]
+
+
+def vendor():
+    """Refresh the vendored browser libraries (bump the pinned versions above to upgrade)."""
     from datetime import date
-    (dst.parent / "SOURCE.txt").write_text(
-        f"Vendored from https://kicanvas.org/kicanvas/kicanvas.js on {date.today()}\n"
-        f"sha256 {hashlib.sha256(data).hexdigest()}\nRefresh with: hw vendor-kicanvas\n", encoding="utf-8")
-    log(f"Updated {dst} ({len(data)} bytes)")
+    for url, rel_dst, label in VENDORED:
+        dst = SITE / rel_dst
+        with urllib.request.urlopen(url) as r:
+            data = r.read()
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(data)
+        source = dst.parent / ("SOURCE.txt" if "static/vendor" in rel_dst else dst.name.split(".")[0] + ".SOURCE.txt")
+        source.write_text(f"{label} from {url} ({date.today()})\nsha256 {hashlib.sha256(data).hexdigest()}\n"
+                          "Refresh with: hw vendor\n", encoding="utf-8")
+        log(f"Updated {rel_dst} ({len(data)} bytes)")
 
 
 def clean():
@@ -569,11 +605,13 @@ def export_template(dest):
         shutil.copy2(REPO / f"{project}.kibot.yaml", out / f"{TEMPLATE_BASE}.kibot.yaml")
         for name in ("hw.py", "go.mod", "go.sum"):
             shutil.copy2(SITE / name, out / "site" / name)
-        for name in ("ci", "layouts", "scripts"):
+        for name in ("assets", "ci", "layouts", "scripts"):
             shutil.copytree(SITE / name, out / "site" / name, ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(SITE / "static" / "vendor", out / "site" / "static" / "vendor")
-        for name in ("board.md", "release.md"):
+        for name in ("board.md", "drawings.md", "bill-of-materials.md", "release.md"):   # project-neutral pages
             shutil.copy2(SITE / "content" / name, out / "site" / "content" / name)
+        shutil.copytree(SITE / "template" / "design", out / "site" / "content" / "design")
+        shutil.copytree(SITE / "content" / "software", out / "site" / "content" / "software")
         for name, target in (("TEMPLATE_README.md", out / "README.md"),
                              ("README.project.md", out / "site" / "README.project.md"),
                              ("template_info.html", out / "meta" / "info.html")):
@@ -616,7 +654,7 @@ def export_template(dest):
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 COMMANDS = ["init", "kibot", "build", "serve", "host", "release", "pin-layout", "unpin-layout",
-            "vendor-kicanvas", "export-template", "clean", "versions", "help"]
+            "vendor", "export-template", "clean", "versions", "help"]
 
 
 def main(argv=None):
@@ -662,8 +700,8 @@ def main(argv=None):
                 setup_layout("--pin")
             elif c == "unpin-layout":
                 setup_layout("--unpin")
-            elif c == "vendor-kicanvas":
-                vendor_kicanvas()
+            elif c == "vendor":
+                vendor()
             elif c == "export-template":
                 export_template(a.dest or BUILD / "template" / "hw-pipeline")
             elif c == "clean":

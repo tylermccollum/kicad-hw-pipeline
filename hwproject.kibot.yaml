@@ -47,6 +47,23 @@ outputs:
         - field: _field_lcsc_part
           name: LCSC Part #
 
+  - name: bom_csv
+    comment: BOM for the site's sourcing table (LCSC links; Manufacturer/MPN if present)
+    type: bom
+    dir: BoM
+    options:
+      format: CSV
+      output: "%f-bom.csv"
+      columns:
+        - References
+        - Value
+        - Footprint
+        - { field: Quantity Per PCB, name: Qty }
+        - { field: _field_lcsc_part, name: LCSC }
+        - Manufacturer
+        - MPN
+      csv: { hide_pcb_info: true, hide_stats_info: true, quote_all: true }
+
   - name: ibom
     comment: Interactive BOM
     type: ibom
@@ -54,10 +71,20 @@ outputs:
     options: { output: "%f-ibom.html" }
 
   - name: glb
-    comment: Board model for the site's assembly viewer
+    comment: Board model for the site's interactive 3D viewer
     type: export_3d
     dir: Assembly
-    options: { format: glb, output: "assembly-pcb.glb" }
+    options:
+      format: glb
+      output: "assembly-pcb.glb"
+      # Outer copper, silkscreen and solder mask make it look like the real
+      # board (~19 MB for FreeWheel, ~2 MB gzipped). Tracks/vias are most of
+      # the size: drop include_tracks for ~7 MB, or all of these for ~2 MB.
+      include_tracks: true
+      include_pads: true
+      include_zones: true
+      include_silkscreen: true
+      include_soldermask: true
 
   # Site renders: KiCad's raytracer (correct package colours / ENIG, ~20 s each).
   # Views: rotate_* in 10 degree steps; zoom in steps (negative = further away).

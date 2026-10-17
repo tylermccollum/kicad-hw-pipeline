@@ -1,11 +1,22 @@
 ---
 title: Board
-type: board
+type: wide
 weight: 20
 ---
 
-Schematic, PCB, 3D renders and interactive BOM for the current revision.
-The PDFs and iBOM are authoritative; the KiCanvas viewer is a convenience
-preview and may not render everything faithfully.
+Interactive views of this revision. The PDFs on the Drawings page and the
+interactive BOM are authoritative; these viewers are previews.
+
+## 3D model
+
+{{< call-partial "assembly.html" >}}
+
+## Schematic & PCB
+
+{{< call-partial "kicanvas.html" >}}
+
+## Renders
+
+{{< call-partial "gallery.html" >}}
 
 {{< check-reports >}}

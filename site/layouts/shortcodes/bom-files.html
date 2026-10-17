@@ -1,0 +1,8 @@
+{{- /* BOM and assembly files discovered by the build (params.bomFiles). */ -}}
+{{- with site.Params.bomFiles -}}
+<ul class="download-list">
+{{- range . }}
+  <li><a href="{{ .path | relURL }}" download>{{ .name }}</a></li>
+{{- end }}
+</ul>
+{{- end -}}

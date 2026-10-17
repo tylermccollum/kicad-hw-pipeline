@@ -1,0 +1,49 @@
+{{- /* Sourcing table from the KiBot CSV BOM (params.bomCsv, under static/):
+       one row per line item with LCSC part links and, when the schematic has
+       them, Manufacturer / MPN. Lines without an LCSC number are flagged. */ -}}
+{{- with site.Params.bomCsv -}}
+{{- $path := printf "static/%s" . -}}
+{{- if fileExists $path -}}
+{{- $rows := transform.Unmarshal (dict "delimiter" ",") (os.ReadFile $path) -}}
+{{- $head := index $rows 0 -}}
+{{- $col := dict -}}
+{{- range $i, $h := $head }}{{ $col = merge $col (dict $h $i) }}{{ end -}}
+{{- $lcscIdx := index $col "LCSC" -}}
+{{- /* show a column only if some row has a value in it (LCSC always) */ -}}
+{{- $show := slice -}}
+{{- range $i, $h := $head -}}
+{{- $used := eq $i $lcscIdx -}}
+{{- range after 1 $rows }}{{ if index . $i }}{{ $used = true }}{{ end }}{{ end -}}
+{{- if $used }}{{ $show = $show | append $i }}{{ end -}}
+{{- end -}}
+{{- $missing := 0 -}}{{- $lines := 0 -}}{{- $parts := 0 -}}
+{{- range after 1 $rows }}{{ $lines = add $lines 1 }}{{ with index . (index $col "Qty") }}{{ $parts = add $parts (int .) }}{{ end }}{{ if not (index . $lcscIdx) }}{{ $missing = add $missing 1 }}{{ end }}{{ end -}}
+{{- if not $lines -}}
+<p>No parts in the BOM yet.</p>
+{{- else -}}
+<p>{{ $lines }} line items, {{ $parts }} parts per board.
+{{- if $missing }} <strong>{{ $missing }} line item{{ if ne $missing 1 }}s{{ end }} without an LCSC part number</strong> (marked ⚠).{{ else }} Every line item has an LCSC part number.{{ end }}</p>
+<div class="hx:overflow-x-auto">
+<table>
+  <thead><tr>
+  {{- range $i, $h := $head }}{{ if in $show $i }}<th>{{ $h }}</th>{{ end }}{{ end -}}
+  </tr></thead>
+  <tbody>
+  {{- range after 1 $rows }}
+  <tr>
+    {{- range $i, $cell := . }}
+    {{- if not (in $show $i) }}
+    {{- else if eq $i $lcscIdx }}
+    <td>{{ with $cell }}<a href="https://www.lcsc.com/product-detail/{{ . }}.html" target="_blank" rel="noopener">{{ . }}</a>{{ else }}⚠{{ end }}</td>
+    {{- else }}
+    <td>{{ $cell }}</td>
+    {{- end }}
+    {{- end }}
+  </tr>
+  {{- end }}
+  </tbody>
+</table>
+</div>
+{{- end -}}
+{{- end -}}
+{{- end -}}
