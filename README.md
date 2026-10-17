@@ -109,3 +109,20 @@ This template is exported from a working project with
 `hw export-template --dest <this folder>`; the export keeps `.git` and
 replaces everything else, so make changes in the source project, re-export,
 then commit here.
+
+## License
+
+This template and its tooling are licensed under the
+[GNU General Public License v3.0](LICENSE) (GPL-3.0). Vendored browser
+libraries in `site/static/vendor/` keep their own licenses (see the license
+file in each folder).
+
+`hw init` moves this license to `site/LICENSE`, since it covers the pipeline
+tooling, leaving the root of a new project free for the project's own license.
+
+## Credits
+
+The documentation site is built on
+[hugo-kicad-site](https://github.com/laenzlinger/hugo-kicad-site) by
+laenzlinger, a Hugo theme for KiCad projects (GPL-3.0). The layouts in
+`site/layouts/` extend and override its templates.
