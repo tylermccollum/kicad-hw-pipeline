@@ -575,7 +575,7 @@ def write_if_changed(path, content, label, newline=None):
 
 
 TEMPLATE_MARKER = "hw-pipeline template README"
-KEEP_AT_ROOT = {".git", ".github", ".gitignore", ".gitattributes", "README.md", "hw", "hw.cmd",
+KEEP_AT_ROOT = {".git", ".github", ".gitignore", ".gitattributes", "README.md", "LICENSE", "hw", "hw.cmd",
                 "site", "hardware", "firmware", "tools", "build", "generated"}
 PLACEHOLDER_README = {
     "firmware": "# Firmware\n\nFirmware for the board's MCU. Document it on the site's Software tab\n"
@@ -670,6 +670,10 @@ def init(title, flat=False):
         readme.write_text(text, encoding="utf-8")
         project_readme.unlink()
         log(f"+ {lay.rel(readme)} (project README)")
+        # The template's GPL covers the tooling in site/; the root is left for the project's own license
+        if (lay.root / "LICENSE").exists() and not (SITE / "LICENSE").exists():
+            shutil.move(str(lay.root / "LICENSE"), str(SITE / "LICENSE"))
+            log(f"+ {site_rel}/LICENSE (GPL-3.0, for the pipeline tooling)")
 
     title = title or project
     for f in (SITE / "hugo.yaml", readme):
@@ -828,6 +832,7 @@ def export_template(dest):
         shutil.copytree(SITE / "template" / "design", out / "site" / "content" / "design")
         shutil.copytree(SITE / "content" / "software", out / "site" / "content" / "software")
         for name, target in (("TEMPLATE_README.md", out / "README.md"),
+                             ("LICENSE", out / "LICENSE"),
                              ("README.project.md", out / "site" / "README.project.md"),
                              ("template_info.html", out / "meta" / "info.html")):
             shutil.copy2(SITE / "template" / name, target)
