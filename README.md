@@ -56,18 +56,44 @@ exact location.)
    |---|---|
    | `hw init --title "My Board"` | `./hw init --title "My Board"` |
 
-   This initialises git (if needed), installs `.github/workflows/ci.yml`
-   (KiCad templates can't carry hidden folders, so its source lives in
-   `site/ci/`), fills the site title and GitHub URL into `site/hugo.yaml`
-   (re-run after adding an `origin` remote), adds the empty drawing layers
-   (DrillMap, FabNotes, Dimensions, AsmNotes, AsmCover) for your own
-   annotations, and replaces this README with a project README.
-3. Replace the placeholder 50 x 50 mm outline and mounting holes with your
-   design, then build and preview:
+   This turns the new folder into a monorepo:
+
+   ```
+   my-board/            git root
+   ├── README.md        project README with a repository map
+   ├── hardware/        the KiCad project (open hardware/my-board.kicad_pro from now on)
+   ├── site/            documentation site and build tooling (hw)
+   ├── firmware/        placeholder
+   └── tools/           placeholder
+   ```
+
+   It also initialises git (if needed), writes `.github/workflows/ci.yml`
+   (KiCad templates can't carry hidden folders; the source is
+   `site/ci/ci.yml`), fills the site title and GitHub URL into
+   `site/hugo.yaml` (re-run after adding an `origin` remote), adds the
+   empty drawing layers (DrillMap, FabNotes, Dimensions, AsmNotes, AsmCover)
+   for your own annotations, and replaces this README.
+
+   For a hardware-only project with everything at the top level, use
+   `hw init --flat` instead.
+3. Open `hardware/<name>.kicad_pro` in KiCad, replace the placeholder
+   50 x 50 mm outline and mounting holes with your design, then build and
+   preview:
 
    ```
    hw kibot build host        (./hw on macOS/Linux)   ->  http://127.0.0.1:8000/
    ```
+
+## Existing repositories
+
+The tooling works in any layout: the KiCad project is found automatically,
+or set `site/hw.json` to `{"hardware": "<folder>"}` if a repository has more
+than one. `generated/` and `build/` are created inside the KiCad project
+folder, so they never collide with a firmware `build/`. After moving
+`site/` or the KiCad project, re-run `hw init` so the CI workflow and
+launchers follow. CI rebuilds and republishes the site on every push to
+`main` (documentation changes included) and builds previews for pull
+requests that touch the hardware or the site.
 
 If `hw` isn't found, run the tool directly: `python site/hw.py ...`
 (`py site\hw.py ...` on Windows, `python3 site/hw.py ...` on macOS/Linux).

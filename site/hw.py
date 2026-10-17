@@ -5,9 +5,16 @@
     hw <command> [<command> ...] [options]          (Windows: hw.cmd)
     python3 site/hw.py <command> ...                (anywhere)
 
+Works for a flat project (KiCad files, site/ and hw at the repo root) and for
+a monorepo (e.g. hardware/, site/, firmware/, tools/): the KiCad project is
+found automatically (or set site/hw.json {"hardware": "<folder>"}).
+generated/ and build/ are created in the KiCad project's folder.
+
 Commands run in the order given, e.g. `hw kibot build host`.
 
   init             one-time setup after creating a project from the template
+                   (moves it into a hardware/ + site/ + firmware/ + tools/ monorepo
+                   unless --flat)
   kibot            run KiBot on the working tree (incl. uncommitted changes) -> generated/
   build            build the site for the working tree -> build/www/latest
   serve            live-reload site at http://localhost:1313/
@@ -41,12 +48,7 @@ from functools import partial
 from pathlib import Path
 
 SITE = Path(__file__).resolve().parent
-REPO = SITE.parent
 SCRIPTS = SITE / "scripts"
-BUILD = REPO / "build"
-GEN = REPO / "generated"
-WWW = BUILD / "www"
-RELEASES = BUILD / "releases"
 # KiCad 10 + KiBot, pinned by digest so release outputs are reproducible.
 KIBOT_IMAGE = os.environ.get(
     "KIBOT_IMAGE",
@@ -66,6 +68,82 @@ from strip_drawing_layers import strip  # noqa: E402
 
 class HwError(Exception):
     pass
+
+
+# ── Repository layout ────────────────────────────────────────────────────────
+# Three independent locations, so the same tooling works for a flat project
+# (KiCad files, site/ and hw at the repo root) and a monorepo (e.g. hardware/,
+# site/, firmware/, tools/ under one git root):
+#   ROOT  git repository root (CI, .github/, tags); before `git init`, the
+#         folder above site/
+#   HW    folder with the single .kicad_pro, its KiBot config and
+#         kibot_templates/; generated/ and build/ go here too
+#   SITE  folder with this script
+# HW is found next to site/ first, then by searching the repo's non-ignored
+# files; override with site/hw.json {"hardware": "<path from ROOT>"} or HW_DIR.
+SKIP_DIRS = {".git", "build", "generated", "node_modules", "__pycache__"}
+
+
+def _git_root(start):
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=start,
+                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    return Path(r.stdout.strip()).resolve() if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _find_hardware(root):
+    override = os.environ.get("HW_DIR")
+    cfg = SITE / "hw.json"
+    if not override and cfg.exists():
+        override = json.loads(cfg.read_text(encoding="utf-8")).get("hardware")
+    if override:
+        hw = (root / override).resolve()
+        if not list(hw.glob("*.kicad_pro")):
+            raise HwError(f"no .kicad_pro in {hw} (from {'HW_DIR' if os.environ.get('HW_DIR') else cfg})")
+        return hw
+    if len(list(SITE.parent.glob("*.kicad_pro"))) == 1:    # flat layout: next to site/
+        return SITE.parent
+    if (root / ".git").exists():
+        r = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "--", "*.kicad_pro"],
+                           cwd=root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        pros = [root / f for f in r.stdout.splitlines() if f]
+    else:
+        pros = [p for p in root.rglob("*.kicad_pro") if not SKIP_DIRS & set(p.relative_to(root).parts)]
+    pros = [p for p in pros if not any(part.endswith("-backups") or part in SKIP_DIRS
+                                       for part in p.relative_to(root).parts[:-1])]
+    dirs = sorted({p.parent.resolve() for p in pros})
+    if len(dirs) != 1:
+        found = ", ".join(str(d.relative_to(root)) or "." for d in dirs) or "none"
+        raise HwError(f"can't tell which KiCad project to build (found: {found}); "
+                      f'create {cfg.relative_to(root)} with {{"hardware": "<folder>"}}')
+    return dirs[0]
+
+
+class Layout:
+    def __init__(self):
+        self.root = _git_root(SITE) or SITE.parent
+        self.hw = _find_hardware(self.root)
+        self.build = self.hw / "build"
+        self.gen = self.hw / "generated"
+        self.www = self.build / "www"
+        self.releases = self.build / "releases"
+
+    def rel(self, path):
+        """Path relative to ROOT, POSIX style ('.' for ROOT itself)."""
+        return Path(path).resolve().relative_to(self.root).as_posix()
+
+    @property
+    def hw_rel(self):
+        return self.rel(self.hw)
+
+
+_layout = None
+
+
+def L():
+    global _layout
+    if _layout is None:
+        _layout = Layout()
+    return _layout
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -104,8 +182,8 @@ def run(cmd, cwd=None, check=True, capture=False, drop=None):
     return code
 
 
-def git(*args, cwd=REPO, check=True):
-    return run(["git", *args], cwd=cwd, check=check, capture=True)
+def git(*args, cwd=None, check=True):
+    return run(["git", *args], cwd=cwd or L().root, check=check, capture=True)
 
 
 def has_commits(repo):
@@ -113,7 +191,8 @@ def has_commits(repo):
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
 
-def project_name(root=REPO):
+def project_name(root=None):
+    root = root or L().hw
     if os.environ.get("PROJECT"):
         return os.environ["PROJECT"]
     pros = sorted(Path(root).glob("*.kicad_pro"))
@@ -123,7 +202,7 @@ def project_name(root=REPO):
 
 
 def board_is_open(project):
-    return (REPO / f"~{project}.kicad_pcb.lck").exists()
+    return (L().hw / f"~{project}.kicad_pcb.lck").exists()
 
 
 def docker(image, cmd, mounts=(), workdir=None, env=None, ports=(), drop=None, label="container"):
@@ -152,10 +231,11 @@ def docker(image, cmd, mounts=(), workdir=None, env=None, ports=(), drop=None, l
 
 
 def copy_worktree(dst):
-    """Copy tracked + untracked (non-ignored) files of the working tree to dst."""
-    files = git("ls-files", "-z", "-co", "--exclude-standard").split("\0")
+    """Copy the hardware folder's tracked + untracked (non-ignored) files from the
+    working tree to dst (paths relative to ROOT)."""
+    files = git("ls-files", "-z", "-co", "--exclude-standard", "--", L().hw_rel).split("\0")
     for f in filter(None, files):
-        src = REPO / f
+        src = L().root / f
         if src.is_file():
             out = Path(dst) / f
             out.parent.mkdir(parents=True, exist_ok=True)
@@ -175,13 +255,15 @@ def kibot(ref, out, strict=False):
     changes. KiBot edits the project in place (text variables, zone refills) and
     the drawing layout is generated in the copy, so real files are never touched.
     """
+    lay = L()
     project = project_name()
-    work = BUILD / "work" / ref.replace("/", "_")
-    cache = BUILD / "cache_3d"
+    work = lay.build / "work" / ref.replace("/", "_")   # copy of the whole repo (ROOT)
+    whw = work / lay.hw_rel                             # hardware folder inside the copy
+    cache = lay.build / "cache_3d"
     rmtree(work)
     work.parent.mkdir(parents=True, exist_ok=True)
     cache.mkdir(parents=True, exist_ok=True)
-    if ref == "WORKTREE" and not has_commits(REPO):
+    if ref == "WORKTREE" and not has_commits(lay.root):
         # Brand-new repo without commits: snapshot the working tree into a scratch repo.
         work.mkdir()
         copy_worktree(work)
@@ -191,18 +273,19 @@ def kibot(ref, out, strict=False):
             cwd=work)
     elif ref == "WORKTREE":
         # Local clone: has every tag (diffs, git describe) and is cheap.
-        git("clone", "-q", "--local", "--no-checkout", str(REPO), str(work))
+        git("clone", "-q", "--local", "--no-checkout", str(lay.root), str(work))
         git("checkout", "-q", "--detach", git("rev-parse", "HEAD"), cwd=work)
         copy_worktree(work)
     else:
-        git("clone", "-q", "--local", "--no-checkout", str(REPO), str(work))
+        git("clone", "-q", "--local", "--no-checkout", str(lay.root), str(work))
         git("checkout", "-q", "--detach", ref, cwd=work)
         cfg = f"{project}.kibot.yaml"
-        if not (work / cfg).exists():   # tags made before the pipeline existed
+        if not (whw / cfg).exists():   # tags made before the pipeline existed
             log(f"NOTE: {ref} has no {cfg}; using the working tree's copy")
-            shutil.copy2(REPO / cfg, work / cfg)
-    if not (work / "kibot_templates").exists():
-        shutil.copytree(REPO / "kibot_templates", work / "kibot_templates")
+            whw.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(lay.hw / cfg, whw / cfg)
+    if not (whw / "kibot_templates").exists():
+        shutil.copytree(lay.hw / "kibot_templates", whw / "kibot_templates")
 
     defs = ["-E", f"CHECKS_DONT_STOP={'false' if strict else 'true'}"]
     tagged = subprocess.run(["git", "describe", "--exact-match", "--tags", "HEAD"], cwd=work,
@@ -215,7 +298,7 @@ def kibot(ref, out, strict=False):
     # Drawing layout: layers, scale, table/image placeholders, outline dimensions.
     docker(KIBOT_IMAGE, ["python3", "/scripts/setup_drawing_layers.py",
                          f"{project}.kicad_pcb", f"{project}.kibot.yaml"],
-           mounts=[(work, "/w"), (SCRIPTS, "/scripts", True)], workdir="/w", drop="assert",
+           mounts=[(work, "/w"), (SCRIPTS, "/scripts", True)], workdir=f"/w/{lay.hw_rel}", drop="assert",
            label="drawing layout")
 
     base = f"-c {project}.kibot.yaml -e {project}.kicad_sch -b {project}.kicad_pcb -d /out {' '.join(defs)}"
@@ -224,7 +307,7 @@ def kibot(ref, out, strict=False):
               f"for t in diff_sch diff_pcb; do kibot {base} -s run_erc,run_drc $t "
               f"|| echo \"WARNING: $t failed (no previous tag?)\"; done")
     docker(KIBOT_IMAGE, ["bash", "-c", script],
-           mounts=[(work, "/w"), (out, "/out"), (cache, "/cache_3d")], workdir="/w",
+           mounts=[(work, "/w"), (out, "/out"), (cache, "/cache_3d")], workdir=f"/w/{lay.hw_rel}",
            env={"KICAD10_3DMODEL_DIR": "/usr/share/kicad/3dmodels", "KIBOT_3D_MODELS": "/cache_3d"},
            label="KiBot" + (" (strict: ERC/DRC errors fail a release)" if strict else ""))
     log(f"KiBot outputs: {out}")
@@ -349,15 +432,15 @@ def prepare(gen, src, tag, base_url):
 
 
 def hugo(shell_cmd, ports=()):
-    WWW.mkdir(parents=True, exist_ok=True)
+    L().www.mkdir(parents=True, exist_ok=True)
     docker(HUGO_IMAGE, ["sh", "-c", f"hugo mod get && {shell_cmd}"],
-           mounts=[(SITE, "/src"), (BUILD / "hugo_cache", "/cache"), (WWW, "/www")],
+           mounts=[(SITE, "/src"), (L().build / "hugo_cache", "/cache"), (L().www, "/www")],
            workdir="/src", env={"HUGO_CACHEDIR": "/cache"}, ports=ports, label="Hugo")
 
 
-def versions(www=WWW):
+def versions(www=None):
     """versions.json + redirecting index.html at the hosting root (gh-pages layout)."""
-    www = Path(www)
+    www = Path(www) if www else L().www
 
     def key(tag):
         return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", tag)]
@@ -373,26 +456,27 @@ def versions(www=WWW):
 
 
 def build(base_path):
-    prepare(GEN, REPO, "latest", f"{base_path}/latest/")
+    prepare(L().gen, L().hw, "latest", f"{base_path}/latest/")
     hugo("hugo --minify --cleanDestinationDir --config hugo.yaml,config_override.yaml -d /www/latest")
     versions()
 
 
 def serve(base_path, host_addr):
-    prepare(GEN, REPO, "latest", f"{base_path}/latest/")
+    prepare(L().gen, L().hw, "latest", f"{base_path}/latest/")
     hugo("hugo server -D --bind 0.0.0.0 --baseURL http://localhost:1313/ "
          "--config hugo.yaml,config_override.yaml", ports=[f"{host_addr}:1313:1313"])
 
 
 def host(host_addr, port):
-    WWW.mkdir(parents=True, exist_ok=True)
-    handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(WWW))
+    www = L().www
+    www.mkdir(parents=True, exist_ok=True)
+    handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(www))
     try:
         httpd = http.server.ThreadingHTTPServer((host_addr, port), handler)
     except OSError as e:
         raise HwError(f"can't serve on {host_addr}:{port} ({e.strerror}); is another `hw host` "
                       f"already running? Stop it, or use --port <n>")
-    log(f"Serving {WWW} at http://{host_addr}:{port}/  (Ctrl-C to stop)")
+    log(f"Serving {www} at http://{host_addr}:{port}/  (Ctrl-C to stop)")
     with httpd:
         try:
             httpd.serve_forever()
@@ -428,10 +512,11 @@ def package(gen, project, tag, out):
 def release(tag, strict, base_path):
     if not tag:
         raise HwError("release needs --tag vX.Y.Z")
-    gen = BUILD / "tags" / tag / "generated"
+    lay = L()
+    gen = lay.build / "tags" / tag / "generated"
     kibot(tag, gen, strict=strict)
-    package(gen, project_name(), tag, RELEASES / tag)
-    prepare(gen, BUILD / "work" / tag, tag, f"{base_path}/{tag}/")
+    package(gen, project_name(), tag, lay.releases / tag)
+    prepare(gen, lay.build / "work" / tag.replace("/", "_") / lay.hw_rel, tag, f"{base_path}/{tag}/")
     hugo(f"hugo --minify --cleanDestinationDir --config hugo.yaml,config_override.yaml -d /www/{tag}")
     versions()
 
@@ -441,36 +526,156 @@ def setup_layout(mode):
     project = project_name()
     if board_is_open(project):
         raise HwError("close the board in KiCad first")
-    docker(KIBOT_IMAGE, ["python3", "site/scripts/setup_drawing_layers.py",
+    docker(KIBOT_IMAGE, ["python3", "/scripts/setup_drawing_layers.py",
                          f"{project}.kicad_pcb", f"{project}.kibot.yaml", mode],
-           mounts=[(REPO, "/w")], workdir="/w", drop="assert", label="board layout")
+           mounts=[(L().hw, "/w"), (SCRIPTS, "/scripts", True)], workdir="/w", drop="assert",
+           label="board layout")
 
 
-def init(title):
-    """One-time setup for a project created from the template. Safe to re-run."""
+def launcher_sh(site_rel):
+    return ("#!/bin/sh\n# hw: project tooling (Linux/macOS). See `./hw help`. Windows: hw.cmd\n"
+            f'exec python3 "$(dirname "$0")/{site_rel}/hw.py" "$@"\n')
+
+
+def launcher_cmd(site_rel):
+    win = site_rel.replace("/", "\\")
+    return "\r\n".join([
+        "@echo off",
+        "rem hw: project tooling (Windows cmd/PowerShell). See `hw help`.",
+        "rem Uses the py launcher from python.org installers, else python on PATH.",
+        "where py >nul 2>nul",
+        "if %errorlevel%==0 (",
+        f'  py -3 "%~dp0{win}\\hw.py" %*',
+        ") else (",
+        f'  python "%~dp0{win}\\hw.py" %*',
+        ")",
+        "exit /b %errorlevel%", ""])
+
+
+def render_ci():
+    """site/ci/ci.yml with this repository's layout filled in."""
+    lay = L()
+    hwp = "" if lay.hw_rel == "." else lay.hw_rel + "/"
+    text = (SITE / "ci" / "ci.yml").read_text(encoding="utf-8")
+    if hwp:   # monorepo: any change in the hardware folder (libraries, subfolders) triggers CI
+        text = text.replace('"__HWP__*.kicad_*", "__HWP__*.kibot.yaml", "__HWP__*.kicad_sym", '
+                            '"__HWP__kibot_templates/**"', '"__HWP__**"')
+    return text.replace("__SITE__", lay.rel(SITE)).replace("__OUT__", lay.rel(lay.build)).replace("__HWP__", hwp)
+
+
+def write_if_changed(path, content, label, newline=None):
+    path = Path(path)
+    if path.exists() and path.read_bytes() == content.encode("utf-8"):
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline=newline or "") as f:
+        f.write(content)
+    log(f"+ {label}")
+    return True
+
+
+TEMPLATE_MARKER = "hw-pipeline template README"
+KEEP_AT_ROOT = {".git", ".github", ".gitignore", ".gitattributes", "README.md", "hw", "hw.cmd",
+                "site", "hardware", "firmware", "tools", "build", "generated"}
+PLACEHOLDER_README = {
+    "firmware": "# Firmware\n\nFirmware for the board's MCU. Document it on the site's Software tab\n"
+                "(`site/content/software/`).\n",
+    "tools": "# Tools\n\nHost-side tooling: flashing, calibration, test scripts. Document it on the\n"
+             "site's Software tab (`site/content/software/`).\n",
+}
+
+
+def to_monorepo():
+    """Reorganise a project fresh from the (flat) KiCad template into
+        README.md  hardware/  site/  firmware/  tools/
+    KiCad's New-from-Template always opens <folder>/<name>.kicad_pro, so the
+    template itself has to stay flat; this runs once from `hw init`."""
+    root = SITE.parent
+    locks = sorted(p.name for p in root.glob("~*.lck"))
+    if locks:
+        raise HwError(f"close the project in KiCad first ({', '.join(locks)}); its files are about to move")
+    hardware = root / "hardware"
+    hardware.mkdir(exist_ok=True)
+    for p in sorted(root.iterdir()):
+        if p.name not in KEEP_AT_ROOT:
+            shutil.move(str(p), str(hardware / p.name))
+    log("+ hardware/ (KiCad project moved here; open hardware/*.kicad_pro in KiCad from now on)")
+    for folder, text in PLACEHOLDER_README.items():
+        (root / folder).mkdir(exist_ok=True)
+        if not (root / folder / "README.md").exists():
+            (root / folder / "README.md").write_text(text, encoding="utf-8")
+            log(f"+ {folder}/README.md")
+
+
+def init(title, flat=False):
+    """One-time setup for a project created from the template. Safe to re-run.
+    A fresh template project is reorganised into a monorepo (hardware/, site/,
+    firmware/, tools/) unless `flat`; existing projects are never moved."""
+    global _layout
+    root_readme = SITE.parent / "README.md"
+    fresh = root_readme.exists() and TEMPLATE_MARKER in root_readme.read_text(encoding="utf-8")
+    monorepo = fresh and not flat and list(SITE.parent.glob("*.kicad_pro"))
+    if monorepo:
+        to_monorepo()
+        _layout = None    # the KiCad project moved: rediscover the layout
+    lay = L()
     project = project_name()
-    if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=REPO, stdout=subprocess.DEVNULL,
-                      stderr=subprocess.DEVNULL).returncode:
-        git("init", "-q")
-        log("+ git init")
+    if not _git_root(SITE):
+        git("init", "-q", cwd=lay.root)
+        log(f"+ git init ({lay.root})")
+    site_rel = lay.rel(SITE)
 
-    ci_src, ci_dst = SITE / "ci" / "ci.yml", REPO / ".github" / "workflows" / "ci.yml"
-    if not ci_dst.exists() or ci_dst.read_bytes() != ci_src.read_bytes():
-        ci_dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ci_src, ci_dst)
-        log("+ .github/workflows/ci.yml")
+    # CI workflow at the git root (the only place GitHub reads it), for this layout
+    write_if_changed(lay.root / ".github" / "workflows" / "ci.yml", render_ci(), ".github/workflows/ci.yml")
 
-    readme, project_readme = REPO / "README.md", SITE / "README.project.md"
-    if readme.exists() and "hw-pipeline template README" in readme.read_text(encoding="utf-8") \
-            and project_readme.exists():
-        shutil.move(str(project_readme), str(readme))
-        log("+ README.md (project README)")
+    # Launchers at the git root, pointing at site/ wherever it is
+    if write_if_changed(lay.root / "hw", launcher_sh(site_rel), "hw (launcher)"):
+        os.chmod(lay.root / "hw", 0o755)
+    write_if_changed(lay.root / "hw.cmd", launcher_cmd(site_rel), "hw.cmd (launcher)")
+    if lay.hw != lay.root and not (lay.hw / "site" / "hw.py").exists():
+        for stale in ("hw", "hw.cmd"):   # the template's launchers, if site/ was moved out
+            if (lay.hw / stale).exists():
+                (lay.hw / stale).unlink()
+                log(f"- {lay.rel(lay.hw / stale)} (site/ is elsewhere; use the root launcher)")
+    if not (lay.root / ".gitattributes").exists() and (lay.hw / ".gitattributes").exists():
+        shutil.copy2(lay.hw / ".gitattributes", lay.root / ".gitattributes")
+        log("+ .gitattributes")
+
+    # Ignore build output and staged site assets, relative to the git root
+    ignore = lay.root / ".gitignore"
+    existing = ignore.read_text(encoding="utf-8").splitlines() if ignore.exists() else []
+    if lay.hw != lay.root and (lay.hw / ".gitignore").exists():   # the template's own, in hardware/
+        existing += [f"{lay.hw_rel}/{x.strip('/')}/" for x in ("generated", "build")
+                     if f"{x}/" in (lay.hw / ".gitignore").read_text(encoding="utf-8").splitlines()]
+    wanted = [f"{lay.rel(lay.gen)}/", f"{lay.rel(lay.build)}/"] + \
+             [f"{site_rel}/{x}" for x in ("public/", "resources/", "config_override.yaml", ".hugo_build.lock")] + \
+             [f"{site_rel}/static/{d}/" for d in STAGED_DIRS]
+    # a bare `name/` pattern (no other slash) already matches that folder at any depth
+    anywhere = {e.strip().strip("/") for e in existing if e.strip().endswith("/") and "/" not in e.strip().strip("/")}
+    missing = [w for w in wanted if w not in existing and w.rstrip("/").split("/")[-1] not in anywhere]
+    if missing:
+        with open(ignore, "a", encoding="utf-8", newline="\n") as f:
+            if existing and existing[-1].strip():
+                f.write("\n")
+            f.write("# hw pipeline: build output and staged site assets\n" + "\n".join(missing) + "\n")
+        log(f"+ .gitignore ({len(missing)} entries)")
+
+    readme, project_readme = lay.root / "README.md", SITE / "README.project.md"
+    if readme.exists() and TEMPLATE_MARKER in readme.read_text(encoding="utf-8") and project_readme.exists():
+        text = project_readme.read_text(encoding="utf-8")
+        if lay.hw == lay.root:   # flat: drop the repository map
+            text = re.sub(r"<!-- monorepo -->.*?<!-- /monorepo -->\n*", "", text, flags=re.S)
+        else:
+            text = text.replace("<!-- monorepo -->\n", "").replace("\n<!-- /monorepo -->\n", "")
+        readme.write_text(text, encoding="utf-8")
+        project_readme.unlink()
+        log(f"+ {lay.rel(readme)} (project README)")
 
     title = title or project
     for f in (SITE / "hugo.yaml", readme):
         if f.exists() and "__PROJECT_TITLE__" in (text := f.read_text(encoding="utf-8")):
             f.write_text(text.replace("__PROJECT_TITLE__", title), encoding="utf-8")
-            log(f'+ {f.relative_to(REPO).as_posix()}: title "{title}"')
+            log(f'+ {lay.rel(f)}: title "{title}"')
 
     hugo_yaml = SITE / "hugo.yaml"
     text = hugo_yaml.read_text(encoding="utf-8")
@@ -481,7 +686,7 @@ def init(title):
         url = re.sub(r"\.git$", "", url)
         if url:
             hugo_yaml.write_text(text.replace("__REPO_URL__", url), encoding="utf-8")
-            log(f"+ site/hugo.yaml: repo {url}")
+            log(f"+ {site_rel}/hugo.yaml: repo {url}")
         else:
             log("NOTE: no 'origin' remote yet; re-run `hw init` after adding one (or edit site/hugo.yaml)")
 
@@ -489,7 +694,8 @@ def init(title):
         log("NOTE: board is open in KiCad; skipped adding the drawing layers (re-run init after closing it)")
     else:
         setup_layout("--layers-only")
-    log("Done. Next: hw kibot build host")
+    log(f"Done ({'flat project' if lay.hw == lay.root else 'hardware in ' + lay.hw_rel + '/'}, "
+        f"site in {site_rel}/). Next: hw kibot build host")
 
 
 def has_remote():
@@ -521,7 +727,8 @@ def vendor():
 
 
 def clean():
-    for p in (SITE / "public", SITE / "resources", GEN, WWW, BUILD / "work", BUILD / "tags"):
+    lay = L()
+    for p in (SITE / "public", SITE / "resources", lay.gen, lay.www, lay.build / "work", lay.build / "tags"):
         rmtree(p)
     for p in (SITE / "config_override.yaml", SITE / ".hugo_build.lock"):
         p.unlink(missing_ok=True)
@@ -590,22 +797,30 @@ def export_template(dest):
         raise HwError(f"{final} exists and isn't a previous template export; refusing to overwrite")
     project = project_name()
     # Stage under build/ (not the system temp dir, which Docker Desktop may not share).
-    BUILD.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="template-staging.", dir=BUILD) as tmp:
+    lay = L()
+    if not (SITE / "template").is_dir():
+        raise HwError(f"{SITE / 'template'} is missing (the template's own READMEs and pages); "
+                      "copy it from the template repository")
+    lay.build.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="template-staging.", dir=lay.build) as tmp:
         out = Path(tmp)
         (out / "meta").mkdir()
         (out / "site" / "content").mkdir(parents=True)
         (out / "site" / "static").mkdir()
 
         # Tooling, copied as-is
-        for name in (".gitignore", ".gitattributes", "hw", "hw.cmd"):
-            if (REPO / name).exists():
-                shutil.copy2(REPO / name, out / name)
-        shutil.copytree(REPO / "kibot_templates", out / "kibot_templates")
-        shutil.copy2(REPO / f"{project}.kibot.yaml", out / f"{TEMPLATE_BASE}.kibot.yaml")
+        for name in (".gitignore", ".gitattributes"):
+            src = lay.hw / name if (lay.hw / name).exists() else lay.root / name
+            if src.exists():
+                shutil.copy2(src, out / name)
+        (out / "hw").write_text(launcher_sh("site"), encoding="utf-8", newline="")   # template is flat
+        os.chmod(out / "hw", 0o755)
+        (out / "hw.cmd").write_text(launcher_cmd("site"), encoding="utf-8", newline="")
+        shutil.copytree(lay.hw / "kibot_templates", out / "kibot_templates")
+        shutil.copy2(lay.hw / f"{project}.kibot.yaml", out / f"{TEMPLATE_BASE}.kibot.yaml")
         for name in ("hw.py", "go.mod", "go.sum"):
             shutil.copy2(SITE / name, out / "site" / name)
-        for name in ("assets", "ci", "layouts", "scripts"):
+        for name in ("assets", "ci", "layouts", "scripts", "template"):   # template: so any project can re-export
             shutil.copytree(SITE / name, out / "site" / name, ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copytree(SITE / "static" / "vendor", out / "site" / "static" / "vendor")
         for name in ("board.md", "drawings.md", "bill-of-materials.md", "release.md"):   # project-neutral pages
@@ -673,7 +888,9 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")), help="port for host")
     ap.add_argument("--dest", default=os.environ.get("DEST"), help="export-template destination")
     ap.add_argument("--title", default=os.environ.get("TITLE"), help="site title (init)")
-    ap.add_argument("--www", default=str(WWW), help="site folder (versions)")
+    ap.add_argument("--flat", action="store_true",
+                    help="init: keep a new project flat instead of moving it into hardware/ (monorepo)")
+    ap.add_argument("--www", default=None, help="site folder (versions; default build/www)")
     a = ap.parse_args(argv)
     if not a.commands or "help" in a.commands:
         ap.print_help()
@@ -685,9 +902,9 @@ def main(argv=None):
     try:
         for c in a.commands:
             if c == "init":
-                init(a.title)
+                init(a.title, a.flat)
             elif c == "kibot":
-                kibot("WORKTREE", GEN)
+                kibot("WORKTREE", L().gen)
             elif c == "build":
                 build(a.base_path)
             elif c == "serve":
@@ -703,7 +920,7 @@ def main(argv=None):
             elif c == "vendor":
                 vendor()
             elif c == "export-template":
-                export_template(a.dest or BUILD / "template" / "hw-pipeline")
+                export_template(a.dest or L().build / "template" / "hw-pipeline")
             elif c == "clean":
                 clean()
             elif c == "versions":

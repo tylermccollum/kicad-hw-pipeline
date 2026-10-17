@@ -1,6 +1,18 @@
 # __PROJECT_TITLE__
 
-Describe the board here.
+Describe the project here.
+
+<!-- monorepo -->
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `hardware/` | KiCad project (open `hardware/*.kicad_pro` in KiCad), KiBot config, drawing templates |
+| `site/` | Documentation site and build tooling (`hw`) |
+| `firmware/` | Firmware for the board's MCU |
+| `tools/` | Host-side tooling: flashing, calibration, test scripts |
+
+<!-- /monorepo -->
 
 ## Hardware pipeline
 
@@ -44,6 +56,12 @@ hw help                           all commands
   `site/content/software/`) and **Release**. Pages are Markdown in `site/content/`; rearrange them freely.
 - The browser libraries (KiCanvas, Online3DViewer, Mermaid; all MIT) are
   vendored, so the site makes no CDN requests; `hw vendor` refreshes them.
+
+In a monorepo (KiCad project in e.g. `hardware/`, alongside `firmware/` and
+`tools/`), run `hw` from the repository root; the KiCad project is found
+automatically, or set `site/hw.json` to `{"hardware": "hardware"}`. Re-run
+`hw init` after moving `site/` or the KiCad project so the CI workflow and
+launchers follow.
 
 ### Publishing (GitHub Pages)
 

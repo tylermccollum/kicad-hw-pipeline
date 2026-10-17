@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Hardware pipeline (KiBot + Hugo)</title></head>
+<body>
+<h2>Hardware pipeline (KiBot + Hugo)</h2>
+<p>Blank KiCad 10 project with a containerised manufacturing and documentation
+pipeline: KiBot outputs (schematic PDF, BOMs, iBOM, 3D renders, diffs, JLCPCB
+package), fabrication and assembly drawings with templated notes, and a
+versioned Hugo site that can be hosted locally or on GitHub Pages.</p>
+<p>After creating the project, close it in KiCad and run
+<code>hw init</code> (Windows) or <code>./hw init</code> (macOS/Linux) in the
+project folder. It reorganises the folder into a monorepo (hardware/, site/,
+firmware/, tools/); then open <code>hardware/&lt;name&gt;.kicad_pro</code>.
+Use <code>hw init --flat</code> to keep everything at the top level. See
+README.md.</p>
+<p>Needs Docker Desktop, git and Python 3 (Windows, macOS or Linux).</p>
+</body></html>
